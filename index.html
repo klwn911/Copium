@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Copium Portfolio</title>
+    <title>Portfolio Tracker</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -27,7 +27,7 @@
 
     <div class="flex flex-col items-center mb-6">
         <div class="w-full max-w-[280px] drop-shadow-[0_0_15px_rgba(188,26,61,0.4)]">
-            <img src="Logo.png" alt="Copium Bull Logo" class="w-full h-auto object-contain">
+            <img src="Logo.png" alt="Bull Logo" class="w-full h-auto object-contain">
         </div>
     </div>
 
@@ -60,32 +60,31 @@
     </div>
 
     <script>
-        // Updated Portfolio Holdings Matrix
-        const holdings = {
-            ETH: 9.56169, 
-            INJ: 10166.40475, 
-            LINK: 2557.39144, 
-            SUI: 22145.188,
-            HBAR: 274711.665, 
-            RENDER: 6105.8845, 
-            QNT: 79.872, 
-            ADA: 4525.94127,
-            ALGO: 7808.78488, 
-            COTI: 138395.515, 
-            ICP: 562.92739
-        };
-
+        // Asset-to-API mapping lookup keys
         const mapping = {
             ETH: "ethereum", INJ: "injective-protocol", LINK: "chainlink", SUI: "sui",
             HBAR: "hedera-hashgraph", RENDER: "render-token", QNT: "quant-network",
             ADA: "cardano", ALGO: "algorand", COTI: "coti", ICP: "internet-computer"
         };
 
-        // Local Storage state engine
+        // Local Storage State Engines
+        let holdings = JSON.parse(localStorage.getItem('copium_holdings')) || null;
         let appHistory = JSON.parse(localStorage.getItem('copium_history')) || [];
         let chartInstance = null;
 
         async function fetchPrices() {
+            // Guard clause to handle missing client keys securely
+            if (!holdings) {
+                document.getElementById('sync-status').innerText = "⚠️ No local holdings setup found";
+                document.getElementById('asset-rows').innerHTML = `
+                    <div class="text-center py-4 text-stone-400 text-xs px-2 leading-relaxed">
+                        No asset quantities detected in browser local storage.<br>
+                        Run <code class="bg-black/40 text-[var(--bull-pink)] px-1 rounded">localStorage.setItem('copium_holdings', JSON.stringify({...}))</code> inside your web inspector console to securely sync balance amounts locally.
+                    </div>
+                `;
+                return;
+            }
+
             try {
                 document.getElementById('sync-status').innerText = "Fetching market rates...";
                 const ids = Object.values(mapping).join(',');
@@ -96,16 +95,14 @@
             } catch (error) {
                 console.error("Network sync failed: ", error);
                 document.getElementById('sync-status').innerText = "⚠️ Offline / API Throttled";
-                if(appHistory.length > 0) processData(null); // Fallback to last cache offline
+                if(appHistory.length > 0) processData(null); 
             }
         }
 
         function processData(livePrices) {
             let totalValue = 0;
-            // Clean dynamic native date array parsing setup
             const today = new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' });
             
-            // Extract the baseline snapshot (yesterday's data points)
             const baseline = appHistory[appHistory.length - 1] || null;
             const baselinePrices = baseline ? baseline.prices : {};
             const baselineTotal = baseline ? baseline.value : null;
@@ -113,9 +110,11 @@
             let calculatedAssets = [];
             
             if (livePrices) {
-                // Compute all alternative assets and their absolute values
+                // Compute only dynamic mappings that exist in your safe browser storage configuration
                 for (const [symbol, amount] of Object.entries(holdings)) {
                     const id = mapping[symbol];
+                    if (!id) continue; // safety fallback for external edits
+
                     const price = livePrices[id]?.usd || 0;
                     const assetValue = amount * price;
                     totalValue += assetValue;
@@ -131,17 +130,15 @@
                     });
                 }
 
-                // Sort assets based on total valuation (descending)
+                // Sort assets based on total valuation (descending order)
                 calculatedAssets.sort((a, b) => b.totalHoldingsValue - a.totalHoldingsValue);
 
-                // Generate asset HTML rows in sorted order
                 let rowsHtml = '';
                 calculatedAssets.forEach(asset => {
                     rowsHtml += generateRowHtml(asset.symbol, asset.price, asset.diff);
                 });
                 document.getElementById('asset-rows').innerHTML = rowsHtml;
 
-                // Append runtime snapshot record to LocalStorage
                 const snapshotPrices = {};
                 for(const [sym, id] of Object.entries(mapping)) {
                     snapshotPrices[id] = livePrices[id]?.usd || 0;
@@ -149,13 +146,12 @@
 
                 const todayPayload = { date: today, value: Math.round(totalValue), prices: snapshotPrices };
                 
-                // Deduplicate matching dates
                 if (appHistory.length === 0 || appHistory[appHistory.length - 1].date !== today) {
                     appHistory.push(todayPayload);
                 } else {
                     appHistory[appHistory.length - 1] = todayPayload;
                 }
-                if (appHistory.length > 30) appHistory.shift(); // Keep maximum trailing month lookback
+                if (appHistory.length > 30) appHistory.shift(); 
                 localStorage.setItem('copium_history', JSON.stringify(appHistory));
             }
 
@@ -198,15 +194,13 @@
 
         function updateChart() {
             const ctx = document.getElementById('weeklyChart').getContext('2d');
-            // Extract the last 7 entries for the weekly view
             const trackingWindow = appHistory.slice(-7);
             
-            // Fill mock baseline markers if app history database is pristine
             while(trackingWindow.length < 7) {
                 trackingWindow.unshift({ date: 'Placeholder', value: null });
             }
 
-            const labels = trackingWindow.map(h => h.date === 'Placeholder' ? '' : h.date.split('.')[0] + '/' + h.date.split('.')[1]);
+            const labels = trackingWindow.map(() => '');
             const dataPoints = trackingWindow.map(h => h.value);
 
             if (chartInstance) chartInstance.destroy();
@@ -217,8 +211,8 @@
                     labels: labels,
                     datasets: [{
                         data: dataPoints,
-                        borderColor: '#f26b8a', // Bull pink accent color
-                        backgroundColor: 'rgba(188, 26, 61, 0.15)', // Transparent Crimson shading
+                        borderColor: '#f26b8a', 
+                        backgroundColor: 'rgba(188, 26, 61, 0.15)', 
                         borderWidth: 2,
                         tension: 0.3,
                         fill: true,
@@ -232,7 +226,10 @@
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        x: { grid: { display: false }, ticks: { color: '#a8a29e', font: { size: 10 } } },
+                        x: { 
+                            grid: { display: false },
+                            ticks: { display: false } 
+                        },
                         y: { 
                             grid: { color: '#31060e' }, 
                             ticks: { 
@@ -246,12 +243,10 @@
             });
         }
 
-        // Automated Background Execution Engine (2:00 AM Cron Mirror)
         function registerDailySyncCron() {
             const now = new Date();
             let executionTarget = new Date();
             
-            // Target execution set to 02:00 AM local time zone
             executionTarget.setHours(2, 0, 0, 0); 
             
             if (now > executionTarget) {
@@ -261,11 +256,10 @@
             const cooldownWindow = executionTarget.getTime() - now.getTime();
             setTimeout(() => {
                 fetchPrices();
-                setInterval(fetchPrices, 24 * 60 * 60 * 1000); // Repeat every 24 hours
+                setInterval(fetchPrices, 24 * 60 * 60 * 1000);
             }, cooldownWindow);
         }
 
-        // Initialization execution runtimes
         fetchPrices();
         registerDailySyncCron();
     </script>

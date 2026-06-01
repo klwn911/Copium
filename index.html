@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Copium Portfolio</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Custom Theme Colors matched to the Bull Logo */
+        :root {
+            --bg-dark: #120205;
+            --card-dark: #1e050a;
+            --bull-crimson: #bc1a3d;
+            --bull-maroon: #730b21;
+            --bull-pink: #f26b8a;
+            --text-light: #fbecee;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+    </style>
+</head>
+<body class="p-4 max-w-md mx-auto sm:py-8">
+
+    <div class="flex flex-col items-center mb-6">
+        <div class="w-full max-w-[280px] drop-shadow-[0_0_15px_rgba(188,26,61,0.4)]">
+            <img src="Logo.png" alt="Copium Bull Logo" class="w-full h-auto object-contain">
+        </div>
+        <h1 class="text-3xl font-black tracking-wider text-center mt-2 uppercase text-[var(--bull-pink)] drop-shadow">
+            Copium Tracker
+        </h1>
+        <p class="text-xs text-stone-400 mt-1" id="sync-status">Initialising local vault...</p>
+    </div>
+
+    <div class="bg-[var(--card-dark)] border border-[var(--bull-maroon)] rounded-2xl p-4 mb-6 shadow-xl">
+        <h2 class="text-sm font-bold uppercase tracking-wide text-stone-400 mb-2">7-Day Total Value</h2>
+        <div class="h-32 w-full">
+            <canvas id="weeklyChart"></canvas>
+        </div>
+    </div>
+
+    <div class="bg-[var(--card-dark)] border border-[var(--bull-maroon)] rounded-2xl p-4 shadow-xl">
+        <div class="flex justify-between items-center border-b border-[var(--bull-maroon)] pb-3 mb-3">
+            <div>
+                <h2 class="text-xs uppercase font-bold text-stone-400 tracking-wider">Total Valuation</h2>
+                <div class="text-3xl font-extrabold tracking-tight text-white" id="total-value">$0</div>
+            </div>
+            <div class="text-right">
+                <span id="total-pct" class="text-sm font-bold px-2 py-1 rounded bg-stone-900 text-stone-400">
+                    --%
+                </span>
+            </div>
+        </div>
+
+        <div class="space-y-2.5" id="asset-rows">
+            <div class="text-center py-4 text-stone-500 text-sm">Fetching CoinGecko prices...</div>
+        </div>
+    </div>
+
+    <script>
+        // Updated Portfolio Holdings Matrix
+        const holdings = {
+            ETH: 9.56169, 
+            INJ: 10166.40475, 
+            LINK: 2557.39144, 
+            SUI: 22145.188,
+            HBAR: 274711.665, 
+            RENDER: 6105.8845, // Successfully updated from 4940.5808
+            QNT: 79.872, 
+            ADA: 4525.94127,
+            ALGO: 7808.78488, 
+            COTI: 138395.515, 
+            ICP: 562.92739
+        };
+
+        const mapping = {
+            ETH: "ethereum", INJ: "injective-protocol", LINK: "chainlink", SUI: "sui",
+            HBAR: "hedera-hashgraph", RENDER: "render-token", QNT: "quant-network",
+            ADA: "cardano", ALGO: "algorand", COTI: "coti", ICP: "internet-computer"
+        };
+
+        // Local Storage state engine
+        let appHistory = JSON.parse(localStorage.getItem('copium_history')) || [];
+        let chartInstance = null;
+
+        async function fetchPrices() {
+            try {
+                document.getElementById('sync-status').innerText = "Fetching market rates...";
+                const ids = ['bitcoin', ...Object.values(mapping)].join(',');
+                const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+                const prices = await response.json();
+                
+                processData(prices);
+            } catch (error) {
+                console.error("Network sync failed: ", error);
+                document.getElementById('sync-status').innerText = "⚠️ Offline / API Throttled";
+                if(appHistory.length > 0) processData(null); // Fallback to last cache offline
+            }
+        }
+
+        function processData(livePrices) {
+            let totalValue = 0;
+            const today = new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' });
+            
+            // Extract the baseline snapshot (yesterday's data points)
+            const baseline = appHistory[appHistory.length - 1] || null;
+            const baselinePrices = baseline ? baseline.prices : {};
+            const baselineTotal = baseline ? baseline.value : null;
+
+            // Generate asset arrays
+            let rowsHtml = '';
+            
+            // Prepend BTC to match the n8n logic print layout
+            if (livePrices) {
+                const btcPrice = livePrices.bitcoin?.usd || 0;
+                const oldBtc = baselinePrices.bitcoin || btcPrice;
+                const btcDiff = oldBtc ? ((btcPrice - oldBtc) / oldBtc) * 100 : 0;
+                rowsHtml += generateRowHtml('BTC', btcPrice, btcDiff);
+
+                // Compute all alternative assets 
+                for (const [symbol, amount] of Object.entries(holdings)) {
+                    const id = mapping[symbol];
+                    const price = livePrices[id]?.usd || 0;
+                    totalValue += (amount * price);
+
+                    const oldPrice = baselinePrices[id] || price;
+                    const diff = oldPrice ? ((price - oldPrice) / oldPrice) * 100 : 0;
+                    rowsHtml += generateRowHtml(symbol, price, diff);
+                }
+
+                // Append runtime snapshot record to LocalStorage
+                const snapshotPrices = { bitcoin: btcPrice };
+                for(const [sym, id] of Object.entries(mapping)) {
+                    snapshotPrices[id] = livePrices[id]?.usd || 0;
+                }
+
+                const todayPayload = { date: today, value: Math.round(totalValue), prices: snapshotPrices };
+                
+                // Deduplicate matching dates
+                if (appHistory.length === 0 || appHistory[appHistory.length - 1].date !== today) {
+                    appHistory.push(todayPayload);
+                } else {
+                    appHistory[appHistory.length - 1] = todayPayload;
+                }
+                if (appHistory.length > 30) appHistory.shift(); // Keep maximum trailing month lookback
+                localStorage.setItem('copium_history', JSON.stringify(appHistory));
+            }
+
+            // Update DOM metrics 
+            document.getElementById('asset-rows').innerHTML = rowsHtml;
+            
+            const dynamicTotal = livePrices ? totalValue : (baselineTotal || 0);
+            document.getElementById('total-value').innerText = `$${Math.round(dynamicTotal).toLocaleString()}`;
+            
+            if (baselineTotal && livePrices) {
+                const totalDiff = ((dynamicTotal - baselineTotal) / baselineTotal) * 100;
+                const badge = document.getElementById('total-pct');
+                badge.innerText = `${totalDiff >= 0 ? '+' : ''}${totalDiff.toFixed(2)}%`;
+                badge.className = `text-sm font-bold px-2 py-1 rounded ${totalDiff >= 0 ? 'bg-emerald-950/80 text-emerald-400' : 'bg-rose-950/80 text-rose-400'}`;
+            }
+
+            document.getElementById('sync-status').innerText = `Synced: Today at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+            updateChart();
+        }
+
+        function generateRowHtml(symbol, price, diff) {
+            const isGreen = diff >= 0;
+            const sign = isGreen ? '+' : '';
+            const colorClass = isGreen ? 'text-emerald-400' : 'text-rose-400';
+            const bgClass = isGreen ? 'bg-emerald-500/10' : 'bg-rose-500/10';
+            const decimals = price > 1000 ? 0 : (price < 1 ? 4 : 2);
+
+            return `
+                <div class="flex justify-between items-center bg-stone-900/40 p-2.5 rounded-xl border border-stone-800/60">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-2 h-2 rounded-full ${isGreen ? 'bg-emerald-400' : 'bg-rose-400'} animate-pulse"></div>
+                        <span class="font-mono font-bold text-stone-200">${symbol.padEnd(5, ' ')}</span>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="font-mono text-sm">$${price.toFixed(decimals)}</span>
+                        <span class="font-mono text-xs font-bold px-2 py-0.5 rounded ${bgClass} ${colorClass} w-20 text-right">
+                            ${sign}${diff.toFixed(2)}%
+                        </span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateChart() {
+            const ctx = document.getElementById('weeklyChart').getContext('2d');
+            // Extract the last 7 entries for the weekly view
+            const trackingWindow = appHistory.slice(-7);
+            
+            // Fill mock baseline markers if app history database is pristine
+            while(trackingWindow.length < 7) {
+                trackingWindow.unshift({ date: 'Placeholder', value: null });
+            }
+
+            const labels = trackingWindow.map(h => h.date === 'Placeholder' ? '' : h.date.split('.')[0] + '/' + h.date.split('.')[1]);
+            const dataPoints = trackingWindow.map(h => h.value);
+
+            if (chartInstance) chartInstance.destroy();
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: dataPoints,
+                        borderColor: '#f26b8a', // Bull pink accent color
+                        backgroundColor: 'rgba(188, 26, 61, 0.15)', // Transparent Crimson shading
+                        borderWidth: 2,
+                        tension: 0.3,
+                        fill: true,
+                        pointBackgroundColor: '#bc1a3d',
+                        pointBorderColor: '#fff',
+                        pointRadius: dataPoints.map(v => v === null ? 0 : 3)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#a8a29e', font: { size: 10 } } },
+                        y: { 
+                            grid: { color: '#31060e' }, 
+                            ticks: { 
+                                color: '#a8a29e', 
+                                font: { size: 9 },
+                                callback: (v) => v ? `$${Math.round(v/1000)}k` : ''
+                            } 
+                        }
+                    }
+                }
+            });
+        }
+
+        // Automated Background Execution Engine (2:00 AM Cron Mirror)
+        function registerDailySyncCron() {
+            const now = new Date();
+            let executionTarget = new Date();
+            
+            // Target execution set to 02:00 AM local time zone
+            executionTarget.setHours(2, 0, 0, 0); 
+            
+            if (now > executionTarget) {
+                executionTarget.setDate(executionTarget.getDate() + 1);
+            }
+            
+            const cooldownWindow = executionTarget.getTime() - now.getTime();
+            setTimeout(() => {
+                fetchPrices();
+                setInterval(fetchPrices, 24 * 60 * 60 * 1000); // Repeat every 24 hours
+            }, cooldownWindow);
+        }
+
+        // Initialization execution runtimes
+        fetchPrices();
+        registerDailySyncCron();
+    </script>
+</body>
+</html>

@@ -88,7 +88,8 @@
             try {
                 document.getElementById('sync-status').innerText = "Fetching market rates...";
                 const ids = Object.values(mapping).join(',');
-                const response = await fetch(`https://api.coigecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+                // TYPO FIXED HERE: coingecko.com
+                const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
                 const prices = await response.json();
                 
                 processData(prices);
@@ -110,10 +111,9 @@
             let calculatedAssets = [];
             
             if (livePrices) {
-                // Compute only dynamic mappings that exist in your safe browser storage configuration
                 for (const [symbol, amount] of Object.entries(holdings)) {
                     const id = mapping[symbol];
-                    if (!id) continue; // safety fallback for external edits
+                    if (!id) continue;
 
                     const price = livePrices[id]?.usd || 0;
                     const assetValue = amount * price;

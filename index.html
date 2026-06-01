@@ -42,15 +42,15 @@
     </div>
 
     <div class="bg-[var(--card-dark)] border border-[var(--bull-maroon)] rounded-2xl p-4 shadow-xl">
-        <div class="flex justify-between items-center border-b border-[var(--bull-maroon)] pb-3 mb-3">
-            <div>
-                <h2 class="text-xs uppercase font-bold text-stone-400 tracking-wider">Total Valuation</h2>
-                <div class="text-3xl font-extrabold tracking-tight text-white" id="total-value">$0</div>
-            </div>
-            <div class="text-right">
-                <span id="total-pct" class="text-sm font-bold px-2 py-1 rounded bg-stone-900 text-stone-400">
-                    --%
-                </span>
+        <div class="border-b border-[var(--bull-maroon)] pb-3 mb-3">
+            <h2 class="text-xs uppercase font-bold text-stone-400 tracking-wider mb-0.5">Total Valuation</h2>
+            <div class="flex justify-between items-center">
+                <div class="text-3xl font-extrabold tracking-tight text-white leading-none" id="total-value">$0</div>
+                <div class="flex justify-end pr-2.5">
+                    <span id="total-pct" class="font-mono text-xs font-bold px-2 py-0.5 rounded bg-stone-900 text-stone-400 w-18 text-right">
+                        --%
+                    </span>
+                </div>
             </div>
         </div>
 
@@ -89,7 +89,7 @@
             try {
                 document.getElementById('sync-status').innerText = "Fetching market rates...";
                 const ids = Object.values(mapping).join(',');
-                const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+                const response = await fetch(`https://api.coigecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
                 const prices = await response.json();
                 
                 processData(prices);
@@ -102,13 +102,8 @@
 
         function processData(livePrices) {
             let totalValue = 0;
-            // Format: "01 June 2026"
-            const today = new Date().toLocaleDateString('en-GB', { 
-                day: '2-digit', 
-                month: 'long', 
-                year: 'numeric',
-                timeZone: 'Europe/Berlin' 
-            });
+            // Clean dynamic native date array parsing setup
+            const today = new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' });
             
             // Extract the baseline snapshot (yesterday's data points)
             const baseline = appHistory[appHistory.length - 1] || null;
@@ -171,7 +166,7 @@
                 const totalDiff = ((dynamicTotal - baselineTotal) / baselineTotal) * 100;
                 const badge = document.getElementById('total-pct');
                 badge.innerText = `${totalDiff >= 0 ? '+' : ''}${totalDiff.toFixed(2)}%`;
-                badge.className = `text-sm font-bold px-2 py-1 rounded ${totalDiff >= 0 ? 'bg-emerald-950/80 text-emerald-400' : 'bg-rose-950/80 text-rose-400'}`;
+                badge.className = `font-mono text-xs font-bold px-2 py-0.5 rounded w-18 text-right ${totalDiff >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`;
             }
 
             document.getElementById('sync-status').innerText = `Synced: Today at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
@@ -193,7 +188,7 @@
                     </div>
                     <div class="flex items-center space-x-4">
                         <span class="font-mono text-sm">$${price.toFixed(decimals)}</span>
-                        <span class="font-mono text-xs font-bold px-2 py-0.5 rounded ${bgClass} ${colorClass} w-20 text-right">
+                        <span class="font-mono text-xs font-bold px-2 py-0.5 rounded ${bgClass} ${colorClass} w-18 text-right">
                             ${sign}${diff.toFixed(2)}%
                         </span>
                     </div>
@@ -211,12 +206,7 @@
                 trackingWindow.unshift({ date: 'Placeholder', value: null });
             }
 
-            // Shorten date on the axis for space considerations: "01 June"
-            const labels = trackingWindow.map(h => {
-                if (h.date === 'Placeholder') return '';
-                const parts = h.date.split(' ');
-                return `${parts[0]} ${parts[1]}`;
-            });
+            const labels = trackingWindow.map(h => h.date === 'Placeholder' ? '' : h.date.split('.')[0] + '/' + h.date.split('.')[1]);
             const dataPoints = trackingWindow.map(h => h.value);
 
             if (chartInstance) chartInstance.destroy();

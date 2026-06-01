@@ -29,14 +29,13 @@
         <div class="w-full max-w-[280px] drop-shadow-[0_0_15px_rgba(188,26,61,0.4)]">
             <img src="Logo.png" alt="Copium Bull Logo" class="w-full h-auto object-contain">
         </div>
-        <h1 class="text-3xl font-black tracking-wider text-center mt-2 uppercase text-[var(--bull-pink)] drop-shadow">
-            Copium Tracker
-        </h1>
-        <p class="text-xs text-stone-400 mt-1" id="sync-status">Initialising local vault...</p>
     </div>
 
     <div class="bg-[var(--card-dark)] border border-[var(--bull-maroon)] rounded-2xl p-4 mb-6 shadow-xl">
-        <h2 class="text-sm font-bold uppercase tracking-wide text-stone-400 mb-2">7-Day Total Value</h2>
+        <div class="flex justify-between items-center mb-2">
+            <h2 class="text-sm font-bold uppercase tracking-wide text-stone-400">7-Day Chart</h2>
+            <p class="text-xs text-stone-400 font-medium" id="sync-status">Initialising local vault...</p>
+        </div>
         <div class="h-32 w-full">
             <canvas id="weeklyChart"></canvas>
         </div>
@@ -68,7 +67,7 @@
             LINK: 2557.39144, 
             SUI: 22145.188,
             HBAR: 274711.665, 
-            RENDER: 6105.8845, // Successfully updated from 4940.5808
+            RENDER: 6105.8845, 
             QNT: 79.872, 
             ADA: 4525.94127,
             ALGO: 7808.78488, 
@@ -89,7 +88,7 @@
         async function fetchPrices() {
             try {
                 document.getElementById('sync-status').innerText = "Fetching market rates...";
-                const ids = ['bitcoin', ...Object.values(mapping)].join(',');
+                const ids = Object.values(mapping).join(',');
                 const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
                 const prices = await response.json();
                 
@@ -103,36 +102,52 @@
 
         function processData(livePrices) {
             let totalValue = 0;
-            const today = new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' });
+            // Format: "01 June 2026"
+            const today = new Date().toLocaleDateString('en-GB', { 
+                day: '2-digit', 
+                month: 'long', 
+                year: 'numeric',
+                timeZone: 'Europe/Berlin' 
+            });
             
             // Extract the baseline snapshot (yesterday's data points)
             const baseline = appHistory[appHistory.length - 1] || null;
             const baselinePrices = baseline ? baseline.prices : {};
             const baselineTotal = baseline ? baseline.value : null;
 
-            // Generate asset arrays
-            let rowsHtml = '';
+            let calculatedAssets = [];
             
-            // Prepend BTC to match the n8n logic print layout
             if (livePrices) {
-                const btcPrice = livePrices.bitcoin?.usd || 0;
-                const oldBtc = baselinePrices.bitcoin || btcPrice;
-                const btcDiff = oldBtc ? ((btcPrice - oldBtc) / oldBtc) * 100 : 0;
-                rowsHtml += generateRowHtml('BTC', btcPrice, btcDiff);
-
-                // Compute all alternative assets 
+                // Compute all alternative assets and their absolute values
                 for (const [symbol, amount] of Object.entries(holdings)) {
                     const id = mapping[symbol];
                     const price = livePrices[id]?.usd || 0;
-                    totalValue += (amount * price);
+                    const assetValue = amount * price;
+                    totalValue += assetValue;
 
                     const oldPrice = baselinePrices[id] || price;
                     const diff = oldPrice ? ((price - oldPrice) / oldPrice) * 100 : 0;
-                    rowsHtml += generateRowHtml(symbol, price, diff);
+
+                    calculatedAssets.push({
+                        symbol,
+                        price,
+                        diff,
+                        totalHoldingsValue: assetValue
+                    });
                 }
 
+                // Sort assets based on total valuation (descending)
+                calculatedAssets.sort((a, b) => b.totalHoldingsValue - a.totalHoldingsValue);
+
+                // Generate asset HTML rows in sorted order
+                let rowsHtml = '';
+                calculatedAssets.forEach(asset => {
+                    rowsHtml += generateRowHtml(asset.symbol, asset.price, asset.diff);
+                });
+                document.getElementById('asset-rows').innerHTML = rowsHtml;
+
                 // Append runtime snapshot record to LocalStorage
-                const snapshotPrices = { bitcoin: btcPrice };
+                const snapshotPrices = {};
                 for(const [sym, id] of Object.entries(mapping)) {
                     snapshotPrices[id] = livePrices[id]?.usd || 0;
                 }
@@ -149,9 +164,6 @@
                 localStorage.setItem('copium_history', JSON.stringify(appHistory));
             }
 
-            // Update DOM metrics 
-            document.getElementById('asset-rows').innerHTML = rowsHtml;
-            
             const dynamicTotal = livePrices ? totalValue : (baselineTotal || 0);
             document.getElementById('total-value').innerText = `$${Math.round(dynamicTotal).toLocaleString()}`;
             
@@ -199,7 +211,12 @@
                 trackingWindow.unshift({ date: 'Placeholder', value: null });
             }
 
-            const labels = trackingWindow.map(h => h.date === 'Placeholder' ? '' : h.date.split('.')[0] + '/' + h.date.split('.')[1]);
+            // Shorten date on the axis for space considerations: "01 June"
+            const labels = trackingWindow.map(h => {
+                if (h.date === 'Placeholder') return '';
+                const parts = h.date.split(' ');
+                return `${parts[0]} ${parts[1]}`;
+            });
             const dataPoints = trackingWindow.map(h => h.value);
 
             if (chartInstance) chartInstance.destroy();

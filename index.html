@@ -10,7 +10,7 @@
     <style>
         /* Custom Theme Colors matched to the Bull Logo */
         :root {
-            --bg-dark: #000000; /*#120205;*/
+            --bg-dark: #000000;
             --card-dark: #1e050a;
             --bull-crimson: #bc1a3d;
             --bull-maroon: #730b21;
@@ -34,8 +34,12 @@
 </head>
 <body class="p-4 max-w-md mx-auto sm:py-8">
 
+    <!-- Hidden native file input for JSON selection -->
+    <input type="file" id="json-file-input" accept=".json,application/json" class="hidden" onchange="handleFileSelect(event)">
+
     <div class="flex flex-col items-center mb-6">
-        <div class="w-full max-w-[280px] drop-shadow-[0_0_15px_rgba(188,26,61,0.4)]">
+        <!-- Tapping the logo triggers the hidden file picker -->
+        <div class="w-full max-w-[280px] drop-shadow-[0_0_15px_rgba(188,26,61,0.4)] cursor-pointer active:scale-95 transition-transform" onclick="triggerFileImport()" title="Tap to upload portfolio JSON">
             <img src="Logo.png" alt="Bull Logo" class="w-full h-auto object-contain">
         </div>
     </div>
@@ -81,14 +85,49 @@
         let appHistory = JSON.parse(localStorage.getItem('copium_history')) || [];
         let chartInstance = null;
 
+        // Triggers native file selection dialog
+        function triggerFileImport() {
+            document.getElementById('json-file-input').click();
+        }
+
+        // Handles local JSON file reading and localStorage sync
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const parsedData = JSON.parse(e.target.result);
+                    
+                    // Support both raw key-value pair JSONs and wrapped JSON structures
+                    let importedHoldings = parsedData.holdings || parsedData;
+
+                    if (typeof importedHoldings !== 'object' || Array.isArray(importedHoldings) || importedHoldings === null) {
+                        throw new Error("Invalid holdings format");
+                    }
+
+                    localStorage.setItem('copium_holdings', JSON.stringify(importedHoldings));
+                    holdings = importedHoldings;
+                    document.getElementById('sync-status').innerText = "Holdings imported successfully!";
+                    fetchPrices();
+                } catch (err) {
+                    console.error("JSON parsing error:", err);
+                    alert("Error parsing JSON file. Make sure it contains valid key-value asset pairs.");
+                }
+            };
+            reader.readAsText(file);
+        }
+
         async function fetchPrices() {
-            // Guard clause to handle missing client keys securely
             if (!holdings) {
                 document.getElementById('sync-status').innerText = "⚠️ No local holdings setup found";
                 document.getElementById('asset-rows').innerHTML = `
-                    <div class="text-center py-4 text-stone-400 text-xs px-2 leading-relaxed">
-                        No asset quantities detected in browser local storage.<br>
-                        Run <code class="bg-black/40 text-[var(--bull-pink)] px-1 rounded">localStorage.setItem('copium_holdings', JSON.stringify({...}))</code> inside your web inspector console to securely sync balance amounts locally.
+                    <div class="text-center py-6 px-2">
+                        <p class="text-stone-400 text-xs mb-4">No asset quantities detected in browser local storage.</p>
+                        <button onclick="triggerFileImport()" class="bg-[var(--bull-crimson)] text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg hover:bg-[var(--bull-pink)] transition-all">
+                            Load JSON from Device
+                        </button>
                     </div>
                 `;
                 return;
@@ -97,7 +136,6 @@
             try {
                 document.getElementById('sync-status').innerText = "Fetching market rates...";
                 const ids = Object.values(mapping).join(',');
-                // TYPO FIXED HERE: coingecko.com
                 const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
                 const prices = await response.json();
                 
